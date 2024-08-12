@@ -1,28 +1,24 @@
 ﻿#include <iostream>
-
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <torch/torch.h>
 #include <torch/script.h>
+#include <chrono>
 
 using torch::indexing::Slice;
 using torch::indexing::None;
 
-
 float generate_scale(cv::Mat& image, const std::vector<int>& target_size) {
     int origin_w = image.cols;
     int origin_h = image.rows;
-
     int target_h = target_size[0];
     int target_w = target_size[1];
-
     float ratio_h = static_cast<float>(target_h) / static_cast<float>(origin_h);
     float ratio_w = static_cast<float>(target_w) / static_cast<float>(origin_w);
     float resize_scale = std::min(ratio_h, ratio_w);
     return resize_scale;
 }
-
 
 float letterbox(cv::Mat &input_image, cv::Mat &output_image, const std::vector<int> &target_size) {
     if (input_image.cols == target_size[1] && input_image.rows == target_size[0]) {
@@ -54,7 +50,6 @@ float letterbox(cv::Mat &input_image, cv::Mat &output_image, const std::vector<i
     return resize_scale;
 }
 
-
 torch::Tensor xyxy2xywh(const torch::Tensor& x) {
     auto y = torch::empty_like(x);
     y.index_put_({"...", 0}, (x.index({"...", 0}) + x.index({"...", 2})).div(2));
@@ -63,7 +58,6 @@ torch::Tensor xyxy2xywh(const torch::Tensor& x) {
     y.index_put_({"...", 3}, x.index({"...", 3}) - x.index({"...", 1}));
     return y;
 }
-
 
 torch::Tensor xywh2xyxy(const torch::Tensor& x) {
     auto y = torch::empty_like(x);
@@ -76,8 +70,6 @@ torch::Tensor xywh2xyxy(const torch::Tensor& x) {
     return y;
 }
 
-
-// Reference: https://github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
 torch::Tensor nms(const torch::Tensor& bboxes, const torch::Tensor& scores, float iou_threshold) {
     if (bboxes.numel() == 0)
         return torch::empty({0}, bboxes.options().dtype(torch::kLong));
@@ -138,7 +130,6 @@ torch::Tensor nms(const torch::Tensor& bboxes, const torch::Tensor& scores, floa
     return keep_t.narrow(0, 0, num_to_keep);
 }
 
-
 torch::Tensor non_max_suppression(torch::Tensor& prediction, float conf_thres = 0.25, float iou_thres = 0.45, int max_det = 300) {
     auto bs = prediction.size(0);
     auto nc = prediction.size(1) - 4;
@@ -177,7 +168,6 @@ torch::Tensor non_max_suppression(torch::Tensor& prediction, float conf_thres = 
     return torch::stack(output);
 }
 
-
 torch::Tensor clip_boxes(torch::Tensor& boxes, const std::vector<int>& shape) {
     boxes.index_put_({"...", 0}, boxes.index({"...", 0}).clamp(0, shape[1]));
     boxes.index_put_({"...", 1}, boxes.index({"...", 1}).clamp(0, shape[0]));
@@ -185,7 +175,6 @@ torch::Tensor clip_boxes(torch::Tensor& boxes, const std::vector<int>& shape) {
     boxes.index_put_({"...", 3}, boxes.index({"...", 3}).clamp(0, shape[0]));
     return boxes;
 }
-
 
 torch::Tensor scale_boxes(const std::vector<int>& img1_shape, torch::Tensor& boxes, const std::vector<int>& img0_shape) {
     auto gain = (std::min)((float)img1_shape[0] / img0_shape[0], (float)img1_shape[1] / img0_shape[1]);
@@ -200,12 +189,10 @@ torch::Tensor scale_boxes(const std::vector<int>& img1_shape, torch::Tensor& box
     return boxes;
 }
 
-
 int main() {
     // Device
     torch::Device device(torch::cuda::is_available() ? torch::kCUDA :torch::kCPU);
 
-    // Note that in this example the classes are hard-coded
     std::vector<std::string> classes {"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant",
                                       "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
                                       "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
@@ -215,15 +202,15 @@ int main() {
                                       "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"};
 
     try {
-        // Load the model (e.g. yolov8s.torchscript)
-        std::string model_path = "/path/to/yolov8s.torchscript";
+        // Load the model
+        std::string model_path = "/home/xiang-tao/git/ultralytics/yolov8s.torchscript";
         torch::jit::script::Module yolo_model;
         yolo_model = torch::jit::load(model_path);
         yolo_model.eval();
         yolo_model.to(device, torch::kFloat32);
 
         // Load image and preprocess
-        cv::Mat image = cv::imread("/path/to/bus.jpg");
+        cv::Mat image = cv::imread("/home/xiang-tao/git/ultralytics/ultralytics/assets/bus.jpg");
         cv::Mat input_image;
         letterbox(image, input_image, {640, 640});
 
@@ -231,10 +218,25 @@ int main() {
         image_tensor = image_tensor.toType(torch::kFloat32).div(255);
         image_tensor = image_tensor.permute({2, 0, 1});
         image_tensor = image_tensor.unsqueeze(0);
-        std::vector<torch::jit::IValue> inputs {image_tensor};
+        std::vector<torch::jit::IValue> inputs {image_tensor.to(device)};
 
-        // Inference
-        torch::Tensor output = yolo_model.forward(inputs).toTensor().cpu();
+        // Warm-up
+        for (int i = 0; i < 10; i++) {
+            yolo_model.forward(inputs);
+        }
+
+        // Measure inference time over 100 runs
+        int num_runs = 100;
+        torch::Tensor output;
+        double total_time = 0.0;
+        for (int i = 0; i < num_runs; i++) {
+            auto start = std::chrono::high_resolution_clock::now();
+            output = yolo_model.forward(inputs).toTensor().cpu();
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> diff = end - start;
+            total_time += diff.count();
+        }
+        std::cout << "Average inference time: " << (total_time / num_runs)*1000 << " ms" << std::endl;
 
         // NMS
         auto keep = non_max_suppression(output)[0];

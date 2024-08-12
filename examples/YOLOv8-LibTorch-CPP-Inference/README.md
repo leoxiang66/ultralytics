@@ -31,5 +31,5 @@ make
 To export YOLOv8 models:
 
 ```commandline
-yolo export model=yolov8s.pt imgsz=640 format=torchscript
+yolo export model=yolov8s.pt imgsz=640 format=torchscript device=0
 ```

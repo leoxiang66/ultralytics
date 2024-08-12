@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 
 # -------------- OpenCV --------------
-set(OpenCV_DIR "/path/to/opencv/lib/cmake/opencv4")
+set(OpenCV_DIR "/usr/include/opencv4")
 find_package(OpenCV REQUIRED)
 
 message(STATUS "OpenCV library status:")
@@ -20,8 +20,8 @@ message(STATUS "    include path: ${OpenCV_INCLUDE_DIRS}")
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # -------------- libtorch --------------
-list(APPEND CMAKE_PREFIX_PATH "/path/to/libtorch")
-set(Torch_DIR "/path/to/libtorch/share/cmake/Torch")
+list(APPEND CMAKE_PREFIX_PATH "/home/xiang-tao/third_party/libtorch")
+set(Torch_DIR "/home/xiang-tao/third_party/libtorch/share/cmake/Torch")
 
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
