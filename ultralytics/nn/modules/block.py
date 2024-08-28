@@ -347,6 +347,7 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         """'forward()' applies the YOLO FPN to input data."""
+        print("Check quant:", hasattr(self, 'quant'))  # Should print True
         return self.quant.add(x, self.cv2(self.cv1(x))) if self.add else self.cv2(self.cv1(x))
 
 
